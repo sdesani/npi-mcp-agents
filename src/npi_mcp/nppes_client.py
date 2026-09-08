@@ -98,6 +98,29 @@ class NPPESClient:
                 records.append(record)
         return records[:limit]
 
+    async def search_by_taxonomy(
+        self,
+        *,
+        taxonomy_search_term: str,
+        state: str | None = None,
+        last_name: str | None = None,
+        limit: int = 50,
+    ) -> list[ProviderRecord]:
+        """Search providers by taxonomy description, narrowed by state/name.
+
+        NPPES filters on ``taxonomy_description`` as a text match, which is
+        broader than a code match; callers are expected to apply the exact
+        code filter to the returned records.
+        """
+        params: dict[str, Any] = {"taxonomy_description": taxonomy_search_term, "limit": limit}
+        if state:
+            params["state"] = state.upper()
+        if last_name:
+            params["last_name"] = last_name
+
+        payload = await self._get(params)
+        return [self._to_provider(raw) for raw in payload.get("results", [])]
+
     async def lookup(self, npi_number: str) -> ProviderRecord | None:
         """Fetch a single provider by NPI. Returns None when nothing matches."""
         payload = await self._get({"number": npi_number, "limit": 1})

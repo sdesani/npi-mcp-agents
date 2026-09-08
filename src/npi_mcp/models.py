@@ -171,3 +171,74 @@ class HealthStatus(_Base):
     status: Literal["ok"] = Field(description="Liveness indicator; always 'ok' when the process responds.")
     version: str = Field(description="Installed npi-mcp package version.")
     uptime_seconds: float = Field(description="Seconds since the server process started.")
+
+
+# --------------------------------------------------------------------------
+# Derived-intelligence outputs (not provided by NPPES itself)
+# --------------------------------------------------------------------------
+
+
+class NPIValidationResult(_Base):
+    """Outcome of an offline NPI format and checksum validation."""
+
+    npi_number: str = Field(description="The NPI exactly as it was supplied by the caller.")
+    is_valid: bool = Field(
+        description="True only when the value is 10 digits AND the check digit is correct.",
+    )
+    check_digit_valid: bool = Field(
+        description=(
+            "True when the 10th digit matches the CMS Luhn check digit. False when it does "
+            "not, and also False when the value is too malformed for the check to run."
+        ),
+    )
+    reason: str = Field(
+        description=(
+            "Human-readable explanation of the result. On check-digit failure this states "
+            "the check digit that was expected."
+        ),
+    )
+
+
+class ProviderStatusReport(_Base):
+    """Referral-eligibility assessment derived from a live NPPES record."""
+
+    npi_number: str = Field(description="The NPI that was assessed.")
+    provider_name: str | None = Field(
+        default=None,
+        description="Provider or organization name, when the record could be retrieved.",
+    )
+    primary_specialty: str | None = Field(
+        default=None,
+        description="Description of the taxonomy flagged primary, when one exists.",
+    )
+    is_eligible_for_referral: bool = Field(
+        description="True only when every eligibility check passed and `concerns` is empty.",
+    )
+    concerns: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One actionable message per failed check. Empty when the provider is eligible."
+        ),
+    )
+
+
+class SpecialtyMatchResult(_Base):
+    """Providers in a state whose taxonomies match a plain-English specialty keyword."""
+
+    specialty_keyword: str = Field(description="The keyword as supplied by the caller.")
+    matched_taxonomy_codes: list[str] = Field(
+        default_factory=list,
+        description="NUCC taxonomy codes the keyword resolved to. Empty if unrecognized.",
+    )
+    state: str | None = Field(default=None, description="Two-letter state the search was scoped to.")
+    providers: list[ProviderRecord] = Field(
+        default_factory=list,
+        description="Matching providers. Empty when nothing matched or the keyword is unknown.",
+    )
+    result_count: int = Field(default=0, description="Number of providers returned.")
+    message: str = Field(
+        description=(
+            "Human-readable outcome. When the keyword is unrecognized this lists every "
+            "supported keyword so the caller can retry without guessing."
+        ),
+    )
