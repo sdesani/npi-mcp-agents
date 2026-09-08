@@ -1,51 +1,70 @@
-# npi-mcp
+---
+title: NPI Registry MCP Server
+emoji: 🩺
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+app_port: 8000
+---
 
-An MCP server that wraps the public [NPPES NPI Registry API](https://npiregistry.cms.hhs.gov/api)
-(version 2.1, no authentication required) and exposes it as MCP tools.
+# NPI Registry MCP Server
+
+An MCP (Model Context Protocol) server that wraps the public
+[NPPES NPI Registry API](https://npiregistry.cms.hhs.gov/api) — the US registry
+of healthcare providers — and exposes it to LLM clients as callable tools. No
+API key is required; NPPES is a free public endpoint.
+
+Beyond straight API passthrough, the server adds a derived-intelligence layer:
+offline NPI checksum validation, a composite referral-eligibility assessment,
+and plain-English specialty search that NPPES itself cannot answer.
+
+- **MCP endpoint:** `/mcp` (streamable HTTP)
+- **Health check:** `/health` → `{"status", "version", "uptime_seconds"}`
 
 ## Tools
 
-| Tool | Use when |
-| --- | --- |
-| `search_provider(first_name, last_name, state, limit)` | You have a name and/or 2-letter state but no NPI. |
-| `lookup_by_npi(npi_number)` | You have the 10-digit NPI and want the full record. |
-| `get_specialties(npi_number)` | You have the NPI and only need the specialty list. |
-| `validate_npi_format(npi_number)` | Offline checksum check; run before spending a lookup. |
-| `check_provider_status(npi_number)` | Composite referral-eligibility judgment. |
-| `find_providers_by_specialty(specialty_keyword, state, last_name_hint)` | Plain-English specialty -> providers in a state. |
+| # | Tool | What it does |
+| --- | --- | --- |
+| 1 | `search_provider(first_name, last_name, state, limit)` | Finds providers by name and/or 2-letter state. The only way to turn a name into an NPI. Searches individual surnames and organization names. |
+| 2 | `lookup_by_npi(npi_number)` | Returns the complete NPPES record for one 10-digit NPI: name, credential, status, addresses, specialties. |
+| 3 | `get_specialties(npi_number)` | Returns just the NUCC taxonomies for an NPI — code, description, primary flag, license state. |
+| 4 | `validate_npi_format(npi_number)` | Offline CMS Luhn checksum validation, no network call. Run it before spending a lookup on unverified input; it names the expected check digit when validation fails. |
+| 5 | `check_provider_status(npi_number)` | Composite referral-eligibility judgment across five checks: checksum, registry existence, active status, primary taxonomy, and a complete practice address. Returns actionable concerns. |
+| 6 | `find_providers_by_specialty(specialty_keyword, state, last_name_hint)` | Maps a plain-English specialty — cardiology, orthopedic, pediatrics, neurology, family medicine, psychiatry, dermatology, oncology — to NUCC taxonomy codes, then returns matching providers in a state. |
 
-### Derived tools
-
-Tools 4-6 implement logic NPPES does not provide:
-
-- **`validate_npi_format`** is synchronous and makes no network call. It runs the
-  CMS Luhn variant: prepend `80840` to the first 9 digits, run standard Luhn,
-  compare with the 10th digit.
-- **`check_provider_status`** runs five ordered checks (checksum, existence,
-  active status, primary taxonomy, complete practice address) and reports each
-  failure as an actionable string in `concerns`.
-- **`find_providers_by_specialty`** maps a clinical keyword to NUCC taxonomy
-  codes via `taxonomies.py`, queries NPPES, then filters to providers actually
-  holding one of those codes.
-
-These three never raise: every failure path -- bad checksum, unknown NPI, NPPES
-outage, unrecognized keyword -- returns a structured result the calling model can
+Tools 4–6 never raise. Every failure path — bad checksum, unknown NPI, NPPES
+outage, unrecognized keyword — returns a structured result the calling model can
 read and recover from.
 
-## Run
+## Run with Docker
+
+```bash
+docker build -t npi-mcp .
+docker run --rm -p 8000:8000 npi-mcp
+curl http://localhost:8000/health
+```
+
+## Run locally
 
 ```bash
 pip install -e .
 npi-mcp                     # or: uvicorn npi_mcp.server:app
 ```
 
-- MCP endpoint: `http://127.0.0.1:8000/mcp` (streamable HTTP)
-- Health: `http://127.0.0.1:8000/health` -> `{"status","version","uptime_seconds"}`
+## Deployment notes
 
-## Notes
+- **Hugging Face Spaces:** the frontmatter above selects the Docker SDK and
+  routes traffic to `app_port: 8000`. Push this repo to a Space and it builds
+  and serves unchanged.
+- **Cloudflare tunnel:** `cloudflared tunnel --url http://localhost:8000` puts
+  the same container behind a public hostname. The server binds `0.0.0.0`, so no
+  configuration differs between the two targets.
 
-- Requires `mcp<2`: version 2.x renamed `FastMCP` to `MCPServer` and moved it out
-  of `mcp.server.fastmcp`.
+## Implementation notes
+
+- Requires `mcp<2`: version 2.x renamed `FastMCP` to `MCPServer` and moved it
+  out of `mcp.server.fastmcp`.
 - `find_providers_by_specialty` is bounded by the NPPES 200-record page cap, so
   in a populous state it returns a sample of matching providers, not a census.
 - NPPES matches individuals on `last_name` and organizations on

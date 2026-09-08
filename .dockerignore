@@ -1,0 +1,32 @@
+# Python bytecode
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local virtualenv and tooling caches
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# VCS
+.git/
+.gitignore
+
+# Local secrets -- must never enter the image
+.env
+.env.*
+*.env
+
+# Editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
