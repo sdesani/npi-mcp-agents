@@ -390,6 +390,7 @@ async def find_providers_by_specialty(
     specialty_keyword: str,
     state: US_STATE_CODE,
     last_name_hint: str = "",
+    limit: int = 5,
 ) -> SpecialtyMatchResult:
     """Find providers in a state who practice a given specialty, by plain-English name.
 
@@ -415,6 +416,10 @@ async def find_providers_by_specialty(
         match far too many providers to be useful.
       last_name_hint: Optional surname to narrow the search when you have a
         partial name, e.g. "Nguyen". Leave as "" to search the whole state.
+      limit: Maximum number of provider records to return, 1-50. Defaults to 5.
+        Each record is large, so ask only for as many as you will actually read;
+        raise it when you need a wider set to choose from. The message always
+        reports how many matched in total, so you can tell when more exist.
 
     Returns a result with:
       matched_taxonomy_codes: the codes the keyword resolved to.
@@ -462,6 +467,9 @@ async def find_providers_by_specialty(
         )
 
     matches = [p for p in candidates if any(s.code in codes for s in p.specialties)]
+    total_matched = len(matches)
+    capped = max(1, min(limit, 50))
+    returned = matches[:capped]
 
     scope = f"in {state.upper()}"
     if hint:
@@ -475,16 +483,21 @@ async def find_providers_by_specialty(
         )
     else:
         message = (
-            f"Found {len(matches)} provider(s) {scope} holding a '{canonical}' taxonomy code, "
+            f"Found {total_matched} provider(s) {scope} holding a '{canonical}' taxonomy code, "
             f"out of {len(candidates)} candidate(s) NPPES returned."
         )
+        if total_matched > len(returned):
+            # Never truncate silently -- the caller must know more exist.
+            message += (
+                f" Returning the first {len(returned)}; raise `limit` (max 50) to see more."
+            )
 
     return SpecialtyMatchResult(
         specialty_keyword=specialty_keyword,
         matched_taxonomy_codes=sorted(codes),
         state=state.upper(),
-        providers=matches,
-        result_count=len(matches),
+        providers=returned,
+        result_count=len(returned),
         message=message,
     )
 
