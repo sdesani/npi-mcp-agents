@@ -19,9 +19,6 @@ Beyond straight API passthrough, the server adds a derived-intelligence layer:
 offline NPI checksum validation, a composite referral-eligibility assessment,
 and plain-English specialty search that NPPES itself cannot answer.
 
-- **MCP endpoint:** `/mcp` (streamable HTTP)
-- **Health check:** `/health` → `{"status", "version", "uptime_seconds"}`
-
 ## Tools
 
 | # | Tool | What it does |
@@ -52,14 +49,43 @@ pip install -e .
 npi-mcp                     # or: uvicorn npi_mcp.server:app
 ```
 
+## Configuration
+
+| Variable | Purpose |
+| --- | --- |
+| `MCP_ALLOWED_HOSTS` | Comma-separated public hostnames this server is reached by, e.g. `my-space.hf.space,my-tunnel.trycloudflare.com`. |
+
+FastMCP enables DNS-rebinding protection by default and answers **421 Misdirected
+Request** to any `Host` header it was not told about. `localhost` and `127.0.0.1`
+(with any port) are always allowed, so local development needs no configuration;
+set `MCP_ALLOWED_HOSTS` for any other hostname. Each entry `H` is added to
+`allowed_hosts`, and `https://H` and `http://H` to `allowed_origins`. Entries may
+be given as bare hostnames or full URLs. The resolved list is logged at startup.
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e MCP_ALLOWED_HOSTS="my-space.hf.space" npi-mcp
+```
+
+## Endpoints
+
+| Path | Purpose |
+| --- | --- |
+| `/mcp` | MCP streamable-HTTP endpoint. |
+| `/health` | Liveness probe: status, version, uptime. |
+| `/` | Root probe returning server name, version, and MCP endpoint path. |
+
 ## Deployment notes
 
 - **Hugging Face Spaces:** the frontmatter above selects the Docker SDK and
   routes traffic to `app_port: 8000`. Push this repo to a Space and it builds
-  and serves unchanged.
+  and serves unchanged. Set `MCP_ALLOWED_HOSTS` to the Space hostname
+  (`<user>-<space>.hf.space`) in the Space's variables, or requests fail with 421.
 - **Cloudflare tunnel:** `cloudflared tunnel --url http://localhost:8000` puts
-  the same container behind a public hostname. The server binds `0.0.0.0`, so no
-  configuration differs between the two targets.
+  the same container behind a public hostname. The server binds `0.0.0.0`, so the
+  only per-target difference is `MCP_ALLOWED_HOSTS` -- which is why the hostname
+  is read at runtime rather than baked into the image, since a quick tunnel gets
+  a new hostname on every run.
 
 ## Implementation notes
 

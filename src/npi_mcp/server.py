@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from npi_mcp import __version__
 from npi_mcp.health import router as health_router
@@ -30,6 +32,55 @@ from npi_mcp.validation import validate_npi
 
 logger = logging.getLogger(__name__)
 
+# Hosts that are always permitted, so local development and container health
+# probes work with no configuration.
+DEFAULT_ALLOWED_HOSTS = ["localhost", "localhost:*", "127.0.0.1", "127.0.0.1:*"]
+
+ALLOWED_HOSTS_ENV_VAR = "MCP_ALLOWED_HOSTS"
+
+
+def build_transport_security(
+    allowed_hosts_env: str | None = None,
+) -> TransportSecuritySettings:
+    """Build DNS-rebinding settings from MCP_ALLOWED_HOSTS.
+
+    FastMCP enables DNS-rebinding protection by default and rejects any Host
+    header it was not told about with 421 Misdirected Request. The public
+    hostname cannot be baked into the image: the same build runs behind a
+    Hugging Face Space hostname and behind a Cloudflare tunnel whose hostname
+    changes on every run. So the deployment supplies it at runtime as a
+    comma-separated list, and the local defaults are always included.
+    """
+    raw = allowed_hosts_env if allowed_hosts_env is not None else os.environ.get(ALLOWED_HOSTS_ENV_VAR, "")
+
+    allowed_hosts = list(DEFAULT_ALLOWED_HOSTS)
+    allowed_origins = [f"http://{host}" for host in DEFAULT_ALLOWED_HOSTS]
+    allowed_origins += [f"https://{host}" for host in DEFAULT_ALLOWED_HOSTS]
+
+    for entry in raw.split(","):
+        host = entry.strip()
+        if not host:
+            continue
+        # Tolerate a pasted URL or trailing slash rather than silently failing
+        # to match the Host header at request time.
+        host = host.removeprefix("https://").removeprefix("http://").rstrip("/")
+        if not host:
+            continue
+        if host not in allowed_hosts:
+            allowed_hosts.append(host)
+        for origin in (f"https://{host}", f"http://{host}"):
+            if origin not in allowed_origins:
+                allowed_origins.append(origin)
+
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
+_transport_security = build_transport_security()
+
 # The MCP sub-app owns the "/mcp" path itself and is mounted at the root, so
 # the endpoint is exactly /mcp with no trailing-slash redirect.
 mcp = FastMCP(
@@ -43,6 +94,7 @@ mcp = FastMCP(
         "turns a plain-English specialty into providers in a given state."
     ),
     streamable_http_path="/mcp",
+    transport_security=_transport_security,
 )
 
 _client = NPPESClient()
@@ -443,6 +495,12 @@ def create_app() -> FastAPI:
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # Surfaced in container logs so a 421 Misdirected Request can be
+        # diagnosed by comparing the rejected Host header against this list.
+        logger.info(
+            "MCP transport security: DNS-rebinding protection on, allowed_hosts=%s",
+            ", ".join(_transport_security.allowed_hosts),
+        )
         # The MCP session manager must run for the duration of the app.
         async with mcp.session_manager.run():
             try:
@@ -456,6 +514,16 @@ def create_app() -> FastAPI:
         description="MCP tools wrapping the public NPPES NPI Registry API.",
         lifespan=lifespan,
     )
+
+    @app.get("/", tags=["ops"])
+    async def root() -> dict[str, str]:
+        """Root probe: platform health checks hit / and must not see a 404."""
+        return {
+            "name": mcp.name,
+            "version": __version__,
+            "mcp_endpoint": "/mcp",
+        }
+
     app.include_router(health_router)
     # Mounted last so /health and the OpenAPI routes above take precedence.
     app.mount("/", mcp_app)
