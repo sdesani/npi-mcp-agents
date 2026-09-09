@@ -1,13 +1,3 @@
----
-title: NPI Registry MCP Server
-emoji: 🩺
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
-app_port: 8000
----
-
 # NPI Registry MCP Server
 
 An MCP (Model Context Protocol) server that wraps the public
@@ -18,6 +8,9 @@ API key is required; NPPES is a free public endpoint.
 Beyond straight API passthrough, the server adds a derived-intelligence layer:
 offline NPI checksum validation, a composite referral-eligibility assessment,
 and plain-English specialty search that NPPES itself cannot answer.
+
+## Guide 
+Follow the [guide](GUIDE.md), to build the server from scratch, deploy and test it, all using Claude or similar AI coding assitant tools.
 
 ## Tools
 
